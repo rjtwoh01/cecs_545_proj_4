@@ -673,36 +673,18 @@ namespace TravelingSalesPerson
             return Convert.ToDouble(stringBuilder.ToString());
         }
 
-        // Source: http://msdn.microsoft.com/en-us/magazine/cc163367.aspx
+        // Source: https://stackoverflow.com/questions/38668748/how-to-generate-random-int-value-using-system-security-cryptography
         private int GetRandomInt(int minValue, int maxValue)
         {
-            byte[] _uint32Buffer = new byte[4];
+            // Generate four random bytes
+            byte[] four_bytes = new byte[4];
+            this.cryptoProvider.GetBytes(four_bytes);
 
-            if (minValue > maxValue)
-            {
-                throw new ArgumentOutOfRangeException("minValue");
-            }
+            // Convert the bytes to a UInt32
+            UInt32 scale = BitConverter.ToUInt32(four_bytes, 0);
 
-            if (minValue == maxValue)
-            {
-                return minValue;
-            }
-
-            Int64 diff = maxValue - minValue;
-
-            while (true)
-            {
-                this.cryptoProvider.GetBytes(_uint32Buffer);
-                UInt32 rand = BitConverter.ToUInt32(_uint32Buffer, 0);
-
-                Int64 max = (1 + (Int64)UInt32.MaxValue);
-                Int64 remainder = max % diff;
-
-                if (rand < max - remainder)
-                {
-                    return (Int32)(minValue + (rand % diff));
-                }
-            }
+            // And use that to pick a random number >= min and < max
+            return (int)(minValue + (maxValue - minValue) * (scale / (uint.MaxValue + 1.0)));
         }
 
         private void MutateOffspring(List<TSPPoint> points, int mutationProbability)
@@ -720,12 +702,8 @@ namespace TravelingSalesPerson
             }
         }
 
-        /// <summary>
-        /// Returns a random chromosome in a population using fitness to weight the populations chromosomes
-        /// Source: http://stackoverflow.com/questions/2772882/c-picking-a-random-item-based-on-probabilities
-        /// </summary>
-        /// <param name="population">Population of chromosomes</param>
-        /// <returns>Chromosome from population to use as a parent</returns>
+        // Randomly returns a chromosome using weighted fitness
+        // Source: http://stackoverflow.com/questions/2772882/c-picking-a-random-item-based-on-probabilities
         private TSPPath SelectParent(List<TSPPath> population)
         {
             double probability = GetRandomDouble();

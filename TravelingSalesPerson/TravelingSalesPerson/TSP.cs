@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Diagnostics;
 using System.Collections;
+using System.Security.Cryptography;
+using System.IO;
 
 namespace TravelingSalesPerson
 {
@@ -17,7 +19,10 @@ namespace TravelingSalesPerson
         public List<Point> points;
         public List<Point> tempFinalList;
         public List<TSPConnection> connectedPoints;
+        public List<TSPPoint> tspPoints;
+        private RNGCryptoServiceProvider cryptoProvider = new RNGCryptoServiceProvider();
 
+        public double[,] matrix;
         public double shortestDistance;
 
         public TSP(List<Point> points)
@@ -27,14 +32,17 @@ namespace TravelingSalesPerson
             this.minPoint = points.First();
             this.maxPoint = points.First();
             this.tempFinalList = new List<Point>();
+            tspPoints = new List<TSPPoint>();
 
             foreach (Point point in points)
             {
-                this.points.Add(point);
+                this.points.Add(point);                
             }
 
             for (int i = 0; i < points.Count; i++)
             {
+                TSPPoint tspPoint = new TSPPoint(points[i], i);
+                tspPoints.Add(tspPoint);
                 Point point = new Point(points[i].X, points[i].Y);
 
                 if (point.X < this.minPoint.X) { this.minPoint.X = point.X; }
@@ -51,6 +59,31 @@ namespace TravelingSalesPerson
             else { this.canvasOffset.X += this.minPoint.X; }
 
             this.shortestDistance = 0;
+            this.GenerateMatrix();
+        }
+
+        private void GenerateMatrix()
+        {
+            this.matrix = new double[this.points.Count, this.points.Count];
+            int count = this.matrix.GetLength(0);
+
+            for (int i = 0; i < count; i++)
+            {
+                for (int j = 0; j < count; j++)
+                {
+                    if (j == i)
+                    {
+                        this.matrix[i, j] = 0;
+                    }
+                    else if (j > i)
+                    {
+                        double pathDistance = distance(this.points.ElementAt(i), this.points.ElementAt(j));
+
+                        this.matrix[i, j] = pathDistance;
+                        this.matrix[j, i] = pathDistance;
+                    }
+                }
+            }
         }
 
         //Setup for DFS and BFS
@@ -428,6 +461,306 @@ namespace TravelingSalesPerson
             temp2.AddRange(temp);
             return temp2;
         }
+
+        #region Genetic Algorithm
+
+        private double FirstHalfDistance(TSPPath chromosome)
+        {
+            double distance = 0;
+
+            for (int i = 1; i < Math.Floor((double)chromosome.points.Count / (double)2); i++)
+            {
+                distance += this.matrix[chromosome.points[i - 1].matrixIndex, chromosome.points[i].matrixIndex];
+            }
+
+            return distance;
+        }
+
+        //Taken from: https://stackoverflow.com/questions/273313/randomize-a-listt
+        private List<TSPPoint> FisherYatesShuffle()
+        {
+            List<TSPPoint> shuffledList = this.tspPoints.ToList();
+
+            int n = shuffledList.Count;
+
+            while (n > 1)
+            {
+                var box = new byte[1];
+                do this.cryptoProvider.GetBytes(box);
+                while (!(box[0] < n * (Byte.MaxValue / n)));
+                var k = (box[0] % n);
+                n--;
+                var value = shuffledList[k];
+                shuffledList[k] = shuffledList[n];
+                shuffledList[n] = value;
+            }
+
+            return shuffledList;
+        }
+
+        private Metrics GenerateMetrics(List<TSPPath> population)
+        {
+            Metrics metrics = new Metrics();
+
+            metrics.min = population[0].Fitness();
+            metrics.max = population[population.Count - 1].Fitness();
+
+            double sum = 0;
+            foreach (TSPPath chromosome in population)
+            {
+                sum += chromosome.Fitness();
+            }
+
+            metrics.average = sum / Convert.ToDouble(population.Count);
+
+            sum = 0;
+            foreach (TSPPath chromosome in population)
+            {
+                sum += Math.Pow(chromosome.Fitness() - metrics.average, 2);
+            }
+
+            metrics.standardDeviation = Math.Sqrt(sum / Convert.ToDouble(population.Count));
+
+            return metrics;
+        }
+
+        private TSPPath GenerateOffspring(TSPPath parent1, TSPPath parent2, int mutationProbability)
+        {
+            int startParent = GetRandomInt(0, 1);
+            int crossoverIndex = GetRandomInt(0, parent1.points.Count - 1);
+
+            int shift = GetRandomInt(0, parent1.points.Count - 2);
+
+            List<TSPPoint> offspringPoints = new List<TSPPoint>();
+
+            //If first half of parent1 is shorter distance than first half of parent2
+            if (startParent == 0)
+            {
+                List<TSPPoint> movedPoints = new List<TSPPoint>();
+
+                for (int i = 0; i < shift; i++)
+                {
+                    movedPoints.Add(parent1.points[i]);
+                }
+
+                parent1.points.RemoveRange(0, shift);
+                parent1.points.InsertRange(parent1.points.Count - 1, movedPoints);
+
+                //Add points for first half of parent1
+                for (int i = 0; i < crossoverIndex; i++)
+                {
+                    offspringPoints.Add(parent1.points[i]);
+                }
+
+                //Add remaining points from parent2
+                for (int i = 0; i < parent2.points.Count; i++)
+                {
+                    if (!offspringPoints.Contains(parent2.points[i]))
+                    {
+                        offspringPoints.Add(parent2.points[i]);
+                    }
+                }
+            }
+            //If first half of parent2 is shorter than first half of parent1
+            else
+            {
+                for (int i = 0; i < shift; i++)
+                {
+                    TSPPoint firstPoint = parent1.points[0];
+                    parent1.points.RemoveAt(0);
+                    parent1.points.Add(firstPoint);
+                }
+
+                //add points for first half of parent2
+                for (int i = 0; i < crossoverIndex; i++)
+                {
+                    offspringPoints.Add(parent2.points[i]);
+                }
+
+                //Add remaining points from parent1
+                for (int i = 0; i < parent1.points.Count; i++)
+                {
+                    if (!offspringPoints.Contains(parent1.points[i]))
+                    {
+                        offspringPoints.Add(parent1.points[i]);
+                    }
+                }
+            }
+
+            MutateOffspring(offspringPoints, mutationProbability);
+
+            return new TSPPath(offspringPoints, CalculateDistance(offspringPoints, true));
+        }
+
+        private List<TSPPath> GeneratePopulation(int initialPopulation)
+        {
+            List<TSPPath> population = new List<TSPPath>();
+
+            //Generate chromosomes
+            for (int i = 0; i < initialPopulation; i++)
+            {
+                //Generate random chromosome for population
+                List<TSPPoint> points = FisherYatesShuffle();
+
+                //Calculate fitness (distance) of chromosome
+                double distance = CalculateDistance(points, true);
+
+                //Create new TSPPath for chromosome
+                TSPPath path = new TSPPath(points, distance);
+
+                //Add chromosome to population
+                population.Add(path);
+            }
+
+            return population;
+        }
+
+        public double GeneticAlgorithm(out List<TSPPoint> shortestPoints, int crossoverPoint, int mutationProbability, int populationSize, int iterations)
+        {
+            List<Metrics> metricsList = new List<Metrics>();
+
+            //Generate initial population
+            List<TSPPath> initialPopulation = GeneratePopulation(populationSize);
+
+            metricsList.Add(GenerateMetrics(initialPopulation));
+
+            int metricIteration = iterations / 50;
+
+            //Sort chromosomes by fitness
+            initialPopulation.Sort();
+
+            //Iterations
+            for (int i = 0; i < iterations; i++)
+            {
+                //Select pair of chromosomes for mating
+                TSPPath parent1 = SelectParent(initialPopulation);
+                TSPPath parent2 = SelectParent(initialPopulation);
+
+                //Create pair of offspring chromosomes by applying genetic operators - crossover and mutation
+                TSPPath offspring = GenerateOffspring(parent1, parent2, mutationProbability);
+
+                initialPopulation.Add(offspring);
+
+                initialPopulation.RemoveAt(initialPopulation.Count - 2);
+
+                //Sort chromosomes by fitness
+                initialPopulation.Sort();
+
+                if (i % metricIteration == 0)
+                {
+                    metricsList.Add(GenerateMetrics(initialPopulation));
+                }
+            }
+
+            shortestPoints = initialPopulation[0].points;
+
+            return initialPopulation[0].Fitness();
+        }
+
+        // Source: http://social.msdn.microsoft.com/Forums/en-AU/csharpgeneral/thread/0e22aecc-91fe-4112-9350-d898dc6bf416?persist=True
+        private double GetRandomDouble()
+        {
+            var bytes = new byte[12];
+            this.cryptoProvider.GetBytes(bytes);
+            var stringBuilder = new StringBuilder("0.");
+            var numbers = bytes.Select(i => Convert.ToInt32((i * 100 / 255) / 10)).ToArray();
+
+            foreach (var number in numbers)
+            {
+                stringBuilder.Append(number);
+            }
+
+            return Convert.ToDouble(stringBuilder.ToString());
+        }
+
+        // Source: http://msdn.microsoft.com/en-us/magazine/cc163367.aspx
+        private int GetRandomInt(int minValue, int maxValue)
+        {
+            byte[] _uint32Buffer = new byte[4];
+
+            if (minValue > maxValue)
+            {
+                throw new ArgumentOutOfRangeException("minValue");
+            }
+
+            if (minValue == maxValue)
+            {
+                return minValue;
+            }
+
+            Int64 diff = maxValue - minValue;
+
+            while (true)
+            {
+                this.cryptoProvider.GetBytes(_uint32Buffer);
+                UInt32 rand = BitConverter.ToUInt32(_uint32Buffer, 0);
+
+                Int64 max = (1 + (Int64)UInt32.MaxValue);
+                Int64 remainder = max % diff;
+
+                if (rand < max - remainder)
+                {
+                    return (Int32)(minValue + (rand % diff));
+                }
+            }
+        }
+
+        private void MutateOffspring(List<TSPPoint> points, int mutationProbability)
+        {
+            double mutation = Convert.ToDouble(mutationProbability);
+            //Randomly decide if offspring is to be mutated based on mutation probability
+            if (GetRandomDouble() < (mutation / 100.00))
+            {
+                int index1 = GetRandomInt(0, points.Count);
+                int index2 = GetRandomInt(0, points.Count);
+
+                TSPPoint temp = points[index1];
+                points[index1] = points[index2];
+                points[index2] = temp;
+            }
+        }
+
+        /// <summary>
+        /// Returns a random chromosome in a population using fitness to weight the populations chromosomes
+        /// Source: http://stackoverflow.com/questions/2772882/c-picking-a-random-item-based-on-probabilities
+        /// </summary>
+        /// <param name="population">Population of chromosomes</param>
+        /// <returns>Chromosome from population to use as a parent</returns>
+        private TSPPath SelectParent(List<TSPPath> population)
+        {
+            double probability = GetRandomDouble();
+
+            int i = 1;
+            double cumulativeProbability = 0;
+            while (cumulativeProbability < probability)
+            {
+                double assignedProbability = (double)(2 * i) / (double)(population.Count * (population.Count + 1));
+                cumulativeProbability += assignedProbability;
+                i++;
+            }
+
+            int parentIndex = Math.Abs(population.Count - 1 - i);
+
+            return population[parentIndex];
+        }
+
+        private double CalculateDistance(List<TSPPoint> points, bool closePath)
+        {
+            double distance = 0;
+
+            for (int i = 1; i < points.Count; i++)
+            {
+                distance += this.matrix[points[i - 1].matrixIndex, points[i].matrixIndex];
+            }
+
+            if (closePath)
+            {
+                distance += this.matrix[points.First().matrixIndex, points.Last().matrixIndex];
+            }
+
+            return distance;
+        }
+        #endregion
 
         #region Permutation
 

@@ -22,6 +22,7 @@
                     <MenuItem Header="DFS" Click="dfsClick"/>
                     <MenuItem Header="BFS" Click="bfsClick"/>
                     <MenuItem Header="Closest Edge Insertion" Click="closestEdgeClick"/>
+                    <MenuItem Header="Genetic Algorithm" Click="geneticAlgorithmClick"/>
                 </ContextMenu>
             </Button.ContextMenu>
         </Button>

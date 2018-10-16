@@ -22,6 +22,8 @@ namespace TravelingSalesPerson
         private string type;
         private TSP bfsDfsTsp;
         private List<TSPConnection> tSPConnections;
+        GeneticAlgorithmOptions geneticAlgorithmOptions;
+        private List<TSPPath> overallSolutions;
 
 
         public MainWindow()
@@ -34,6 +36,7 @@ namespace TravelingSalesPerson
             hideType();
             tspPoints = new List<Point>();
             tSPConnections = new List<TSPConnection>();
+            overallSolutions = new List<TSPPath>();
         }
 
         #region Data Points
@@ -271,6 +274,76 @@ namespace TravelingSalesPerson
             }
         }
 
+        public void solveGeneticAlgorithm(int crossoverPoint, int mutationProbability, int populationSize, int iterations, int trials)
+        {
+            overallSolutions.Clear();
+
+            List<TSPPoint> shortestPoints;
+            List<Point> drawPoints = new List<Point>();
+
+            Stopwatch largeSW = Stopwatch.StartNew();
+
+            for (int i = 0; i < trials; i++)
+            {
+                // Start stopwatch for calculating Genetic Algorithm execution time
+                Stopwatch sw = Stopwatch.StartNew();
+
+                // Solve TSP using Genetic Algorithm
+                double shortestPath = tsp.GeneticAlgorithm(out shortestPoints, crossoverPoint, mutationProbability, populationSize, iterations);
+
+                // Stop stopwatch for calculating Genetic Algorithm execution time
+                sw.Stop();
+
+                // Calculate Genetic Algorithm execution time
+                TimeSpan elapsedTime = sw.Elapsed;
+
+                TSPPath solution = new TSPPath(shortestPoints, shortestPath);
+                solution.elapsedTime = elapsedTime;
+
+                overallSolutions.Add(solution);
+            }
+
+            largeSW.Stop();
+            TimeSpan elapsedTimeOverall = largeSW.Elapsed;
+
+            TSPPath bestSolution = overallSolutions.Min();
+            foreach (TSPPoint tSPPoint in bestSolution.points)
+            {
+                drawPoints.Add(tSPPoint.point);
+            }
+
+            drawLines(drawPoints);
+            string shortestDistance = String.Format("{0:0.00}", bestSolution.Fitness());
+            this.lblRunTime.Content = "Distance: " + shortestDistance + "\nRun Time: " + elapsedTimeOverall + ", solution: " + bestSolution.elapsedTime.ToString();
+
+            displayRunTime();
+
+            writeFile(trials, crossoverPoint, mutationProbability);
+        }
+
+        public void writeFile(int trials, int crossoverPoint, int mutationProbability)
+        {
+            try
+            {
+                using (StreamWriter writer = new StreamWriter("C:/temp/genetic_algorithm_trials-" + trials + "_crossover-" + crossoverPoint + "_mutation-" + mutationProbability + ".csv"))
+                {
+                    writer.WriteLine("Iteration,Fitness,Elapsed Time");
+
+                    int i = 0;
+
+                    foreach (TSPPath solution in overallSolutions)
+                    {
+                        writer.WriteLine(i + "," + solution.Fitness() + "," + solution.elapsedTime.ToString("G"));
+                        i++;
+                    }
+                }
+            }
+            catch(IOException e) {
+                MessageBox.Show("Please close the open file");
+                Debug.WriteLine(e);
+            }
+        }
+
         #endregion
 
         #region UI Elements
@@ -397,7 +470,15 @@ namespace TravelingSalesPerson
 
                 displayRunTime();
                 drawLines(tempResult);
+            }
+            else if (type == "geneticAlgorithm")
+            {
+                if (this.geneticAlgorithmOptions == null)
+                {
+                    this.geneticAlgorithmOptions = new GeneticAlgorithmOptions(this);
+                }
 
+                this.geneticAlgorithmOptions.Show();
             }
             else
             {
@@ -456,6 +537,17 @@ namespace TravelingSalesPerson
                 plotPoints(tspPoints);
             showSolveButton();
             type = "closestEdge";
+            Debug.WriteLine(type);
+        }
+
+        private void geneticAlgorithmClick(object sender, RoutedEventArgs e)
+        {
+            if (canvas != null)
+                this.canvas.Children.Clear();
+            if (tspPoints.Count() != 0)
+                plotPoints(tspPoints);
+            showSolveButton();
+            type = "geneticAlgorithm";
             Debug.WriteLine(type);
         }
 
